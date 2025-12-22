@@ -8,7 +8,7 @@ const pty = require("node-pty");
 const path = require("path");
 const cors = require("cors");
 
-const ROOT_DIR = path.resolve(__dirname, "..");
+const ROOT_DIR = __dirname;
 const USER_DIR = path.join(ROOT_DIR, "user");
 
 console.log("Project root  :", ROOT_DIR);
@@ -18,7 +18,7 @@ const ptyProcess = pty.spawn("bash", ["--login"], {
   name: "xterm-color",
   cols: 80,
   rows: 30,
-  cwd: ROOT_DIR,
+  cwd: USER_DIR,
   env: process.env,
 });
 
