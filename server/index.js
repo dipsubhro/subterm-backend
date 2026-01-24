@@ -80,6 +80,9 @@ ptyProcess.onData((data) => io.emit("terminal:data", data));
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
+  
+  ptyProcess.write("\n");
+  
   socket.on("terminal:write", (d) => ptyProcess.write(d));
 });
 
