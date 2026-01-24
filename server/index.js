@@ -7,6 +7,7 @@ const { Server: SocketServer } = require("socket.io");
 const pty = require("node-pty");
 const path = require("path");
 const cors = require("cors");
+const chokidar = require("chokidar");
 
 const ROOT_DIR = __dirname;
 const USER_DIR = path.join(ROOT_DIR, "user");
@@ -29,6 +30,52 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new SocketServer(server, { cors: { origin: "*" } });
 
+// ─────────────────────────────────────────────────────────────
+// File Watcher with Debounced Broadcasts
+// ─────────────────────────────────────────────────────────────
+let pendingEvents = [];
+let debounceTimer = null;
+const DEBOUNCE_MS = 100;
+
+const watcher = chokidar.watch(USER_DIR, {
+  ignored: [
+    /(^|[\/\\])\.git([\/\\]|$)/,
+    /(^|[\/\\])node_modules([\/\\]|$)/,
+    /\.swp$/,
+    /\.tmp$/,
+  ],
+  persistent: true,
+  ignoreInitial: true,
+});
+
+function emitFsEvents() {
+  if (pendingEvents.length > 0) {
+    io.emit("fs-event", pendingEvents);
+    console.log(`[fs-event] Broadcasted ${pendingEvents.length} event(s)`);
+    pendingEvents = [];
+  }
+}
+
+function queueFsEvent(type, filePath) {
+  const relativePath = path.relative(USER_DIR, filePath);
+  pendingEvents.push({ type, path: relativePath });
+
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(emitFsEvents, DEBOUNCE_MS);
+}
+
+watcher
+  .on("add", (p) => queueFsEvent("add", p))
+  .on("change", (p) => queueFsEvent("change", p))
+  .on("unlink", (p) => queueFsEvent("unlink", p))
+  .on("addDir", (p) => queueFsEvent("addDir", p))
+  .on("unlinkDir", (p) => queueFsEvent("unlinkDir", p))
+  .on("ready", () => console.log("[chokidar] Watching user folder for changes"))
+  .on("error", (err) => console.error("[chokidar] Error:", err));
+
+// ─────────────────────────────────────────────────────────────
+// Terminal PTY
+// ─────────────────────────────────────────────────────────────
 ptyProcess.onData((data) => io.emit("terminal:data", data));
 
 io.on("connection", (socket) => {
@@ -36,10 +83,15 @@ io.on("connection", (socket) => {
   socket.on("terminal:write", (d) => ptyProcess.write(d));
 });
 
-app.get("/files", async (_, res) => {
+// ─────────────────────────────────────────────────────────────
+// API Endpoints
+// ─────────────────────────────────────────────────────────────
+
+// Get tree for react-arborist
+app.get("/api/get-tree", async (_, res) => {
   try {
-    const tree = await buildTree(USER_DIR);
-    res.json({ tree });
+    const tree = await buildArboristTree(USER_DIR, "");
+    res.json(tree);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to build file tree" });
@@ -87,15 +139,50 @@ app.post("/file", async (req, res) => {
   }
 });
 
-async function buildTree(dir) {
+// ─────────────────────────────────────────────────────────────
+// Tree Building Functions
+// ─────────────────────────────────────────────────────────────
+
+// Patterns to ignore in tree
+const IGNORE_PATTERNS = [".git", "node_modules", ".DS_Store"];
+
+function shouldIgnore(name) {
+  return IGNORE_PATTERNS.includes(name) || name.endsWith(".swp") || name.endsWith(".tmp");
+}
+
+// React-arborist compatible tree format
+async function buildArboristTree(dir, basePath) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
-  const tree = {};
+  const nodes = [];
+
+  // Sort: folders first, then files, both alphabetically
+  entries.sort((a, b) => {
+    if (a.isDirectory() && !b.isDirectory()) return -1;
+    if (!a.isDirectory() && b.isDirectory()) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
   for (const ent of entries) {
-    const p = path.join(dir, ent.name);
-    if (ent.isDirectory()) tree[ent.name] = await buildTree(p);
-    else tree[ent.name] = null;
+    if (shouldIgnore(ent.name)) continue;
+    const relativePath = basePath ? `${basePath}/${ent.name}` : ent.name;
+    const fullPath = path.join(dir, ent.name);
+
+    if (ent.isDirectory()) {
+      const children = await buildArboristTree(fullPath, relativePath);
+      nodes.push({
+        id: relativePath,
+        name: ent.name,
+        children,
+      });
+    } else {
+      nodes.push({
+        id: relativePath,
+        name: ent.name,
+      });
+    }
   }
-  return tree;
+
+  return nodes;
 }
 
 const PORT = process.env.PORT || 3334;
