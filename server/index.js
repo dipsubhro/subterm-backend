@@ -90,7 +90,6 @@ io.on("connection", (socket) => {
 // API Endpoints
 // ─────────────────────────────────────────────────────────────
 
-// Get tree for react-arborist
 app.get("/api/get-tree", async (_, res) => {
   try {
     const tree = await buildArboristTree(USER_DIR, "");
