@@ -142,6 +142,85 @@ app.post("/file", async (req, res) => {
   }
 });
 
+// GitHub Import - Clone repository to user folder
+app.post("/github/import", async (req, res) => {
+  const { repoUrl, branch, repoName } = req.body;
+
+  if (!repoUrl || !repoName) {
+    return res.status(400).json({ error: "Missing repoUrl or repoName" });
+  }
+
+  const targetDir = path.join(USER_DIR, repoName);
+
+  console.log(`[GitHub Import] Cloning ${repoUrl} (branch: ${branch || 'default'}) to ${targetDir}`);
+
+  try {
+    // Check if directory already exists
+    try {
+      await fs.access(targetDir);
+      return res.status(400).json({ 
+        error: `Directory "${repoName}" already exists. Please delete it first or use a different name.` 
+      });
+    } catch {
+      // Directory doesn't exist, which is what we want
+    }
+
+    // Use git clone via child_process
+    const { exec } = require("child_process");
+    const util = require("util");
+    const execAsync = util.promisify(exec);
+
+    const branchArg = branch ? `--branch ${branch}` : "";
+    const command = `git clone ${branchArg} --depth 1 "${repoUrl}" "${targetDir}"`;
+
+    console.log(`[GitHub Import] Running: ${command}`);
+
+    await execAsync(command, { 
+      cwd: USER_DIR,
+      timeout: 120000 // 2 minute timeout
+    });
+
+    // Remove .git folder to clean up (optional - comment out if you want to keep git history)
+    const gitDir = path.join(targetDir, ".git");
+    try {
+      await fs.rm(gitDir, { recursive: true, force: true });
+      console.log(`[GitHub Import] Removed .git directory`);
+    } catch (e) {
+      console.log(`[GitHub Import] Note: Could not remove .git directory:`, e.message);
+    }
+
+    console.log(`[GitHub Import] Successfully cloned ${repoName}`);
+    res.json({ 
+      message: `Repository "${repoName}" imported successfully!`,
+      path: repoName
+    });
+
+  } catch (e) {
+    console.error("[GitHub Import] Error:", e);
+    
+    // Clean up partial clone if it exists
+    try {
+      await fs.rm(targetDir, { recursive: true, force: true });
+    } catch {}
+
+    // Parse error message for better user feedback
+    let errorMessage = "Failed to clone repository";
+    if (e.stderr) {
+      if (e.stderr.includes("not found") || e.stderr.includes("does not exist")) {
+        errorMessage = "Repository not found or is private";
+      } else if (e.stderr.includes("branch") && e.stderr.includes("not found")) {
+        errorMessage = `Branch "${branch}" not found`;
+      } else {
+        errorMessage = e.stderr.split("\n")[0] || errorMessage;
+      }
+    } else if (e.message) {
+      errorMessage = e.message;
+    }
+
+    res.status(500).json({ error: errorMessage });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────
 // Tree Building Functions
 // ─────────────────────────────────────────────────────────────
