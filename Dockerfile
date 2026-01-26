@@ -11,13 +11,19 @@ RUN apt-get update && apt-get install -y \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
+# Enable corepack for pnpm
+RUN corepack enable
+
 WORKDIR /app
 
-# Copy package.json (using npm for Docker build - more reliable for native modules)
-COPY package.json ./
+# Copy .npmrc first (contains node-linker=hoisted setting)
+COPY .npmrc ./
 
-# Install dependencies with npm (handles node-pty native compilation automatically)
-RUN npm install
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install dependencies (node-pty will be compiled during install)
+RUN pnpm install
 
 # Copy source code
 COPY . .
