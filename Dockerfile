@@ -11,16 +11,13 @@ RUN apt-get update && apt-get install -y \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
-# Enable corepack for pnpm
-RUN corepack enable
-
 WORKDIR /app
 
-# Copy package files first for better caching
-COPY package.json pnpm-lock.yaml ./
+# Copy package.json (using npm for Docker build - more reliable for native modules)
+COPY package.json ./
 
-# Install dependencies
-RUN pnpm install --frozen-lockfile
+# Install dependencies with npm (handles node-pty native compilation automatically)
+RUN npm install
 
 # Copy source code
 COPY . .
@@ -37,9 +34,6 @@ RUN chown -R appuser:appuser /app \
   && chmod -R 755 /app
 
 USER appuser
-
-# Rebuild node-pty for the container environment
-RUN pnpm rebuild node-pty
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
