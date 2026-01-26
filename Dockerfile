@@ -25,8 +25,8 @@ COPY package.json pnpm-lock.yaml ./
 # Install dependencies
 RUN pnpm install
 
-# Force rebuild node-pty native module from source
-RUN cd node_modules/node-pty && npm run build
+# Rebuild node-pty native module using node-gyp
+RUN cd node_modules/node-pty && npx node-gyp rebuild
 
 # Copy source code
 COPY . .

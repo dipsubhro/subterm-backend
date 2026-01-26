@@ -23,12 +23,27 @@ const ptyProcess = pty.spawn("bash", ["--login"], {
   env: process.env,
 });
 
+
 const app = express();
 app.use(express.json());
-app.use(cors());
+
+// CORS configuration - use CORS_ORIGIN env var or allow all in dev
+const allowedOrigins = process.env.CORS_ORIGIN 
+  ? process.env.CORS_ORIGIN.split(',') 
+  : ['http://localhost:5173', 'https://subterm.subhro.tech'];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 
 const server = http.createServer(app);
-const io = new SocketServer(server, { cors: { origin: "*" } });
+const io = new SocketServer(server, { 
+  cors: { 
+    origin: allowedOrigins,
+    credentials: true
+  } 
+});
 
 // ─────────────────────────────────────────────────────────────
 // File Watcher with Debounced Broadcasts
