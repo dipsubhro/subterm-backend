@@ -22,8 +22,11 @@ COPY .npmrc ./
 # Copy package files
 COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies (node-pty will be compiled during install)
+# Install dependencies
 RUN pnpm install
+
+# Force rebuild node-pty native module from source
+RUN cd node_modules/node-pty && npm run build
 
 # Copy source code
 COPY . .
