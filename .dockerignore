@@ -1,4 +1,9 @@
-client
 node_modules
+.env
+.git
+.gitignore
 Dockerfile
 .dockerignore
+*.log
+.DS_Store
+user/
