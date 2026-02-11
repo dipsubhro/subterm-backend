@@ -99,6 +99,10 @@ io.on("connection", (socket) => {
   ptyProcess.write("\n");
   
   socket.on("terminal:write", (d) => ptyProcess.write(d));
+
+  socket.on("terminal:resize", ({ cols, rows }) => {
+    ptyProcess.resize(cols, rows);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
