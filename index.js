@@ -9,11 +9,9 @@ const path = require("path");
 const cors = require("cors");
 const chokidar = require("chokidar");
 
-const ROOT_DIR = __dirname;
-const USER_DIR = path.join(ROOT_DIR, "user");
+const USER_DIR = path.join(__dirname, "user");
 
-console.log("Project root  :", ROOT_DIR);
-console.log("Editable path :", USER_DIR);
+console.log("Workspace root:", USER_DIR);
 
 const ptyProcess = pty.spawn("bash", ["--login"], {
   name: "xterm-color",
@@ -109,13 +107,29 @@ io.on("connection", (socket) => {
 // API Endpoints
 // ─────────────────────────────────────────────────────────────
 
-app.get("/api/get-tree", async (_, res) => {
+app.get("/api/fs", async (req, res) => {
   try {
-    const tree = await buildArboristTree(USER_DIR, "");
-    res.json(tree);
+    const requestedPath = req.query.path || "/";
+
+    // Resolve to an absolute path anchored at USER_DIR
+    const absPath = path.resolve(USER_DIR, `.${requestedPath}`);
+
+    // Block path-traversal: resolved path must stay inside USER_DIR
+    if (!absPath.startsWith(USER_DIR)) {
+      return res.status(403).json({ error: "Access denied – outside workspace" });
+    }
+
+    const children = await listDirectoryChildren(absPath, requestedPath);
+    res.json({ path: requestedPath, children });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to build file tree" });
+    console.error("[api/fs]", err);
+    if (err.code === "ENOENT") {
+      return res.status(404).json({ error: "Directory not found" });
+    }
+    if (err.code === "ENOTDIR") {
+      return res.status(400).json({ error: "Path is not a directory" });
+    }
+    res.status(500).json({ error: "Failed to read directory" });
   }
 });
 
@@ -183,10 +197,7 @@ app.post("/github/import", async (req, res) => {
       // Directory doesn't exist, which is what we want
     }
 
-    // Use git clone via child_process
-    const { exec } = require("child_process");
-    const util = require("util");
-    const execAsync = util.promisify(exec);
+    // Use git clone via child_process (exec/execAsync from module scope)
 
     const branchArg = branch ? `--branch ${branch}` : "";
     const command = `git clone ${branchArg} --depth 1 "${repoUrl}" "${targetDir}"`;
@@ -240,49 +251,154 @@ app.post("/github/import", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// Tree Building Functions
+// Lazy Directory Listing (single level) + Git Status
 // ─────────────────────────────────────────────────────────────
 
-// Patterns to ignore in tree
+const { exec } = require("child_process");
+const util = require("util");
+const execAsync = util.promisify(exec);
+
 const IGNORE_PATTERNS = [".git", "node_modules", ".DS_Store"];
 
 function shouldIgnore(name) {
-  return IGNORE_PATTERNS.includes(name) || name.endsWith(".swp") || name.endsWith(".tmp");
+  return (
+    IGNORE_PATTERNS.includes(name) ||
+    name.endsWith(".swp") ||
+    name.endsWith(".tmp")
+  );
 }
 
-// React-arborist compatible tree format
-async function buildArboristTree(dir, basePath) {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const nodes = [];
+// ── Git helpers ──────────────────────────────────────────────
 
-  // Sort: folders first, then files, both alphabetically
+/**
+ * Parse `git status --porcelain -uall` into a Map<relativePath, gitInfo>.
+ * XY columns: X = index (staged), Y = working-tree.
+ */
+async function getGitStatusMap(cwd) {
+  const statusMap = new Map();
+  try {
+    const { stdout } = await execAsync("git status --porcelain -uall", {
+      cwd,
+      timeout: 5000,
+    });
+
+    for (const line of stdout.split("\n")) {
+      if (!line || line.length < 4) continue;
+
+      const x = line[0]; // index status
+      const y = line[1]; // working-tree status
+      // Porcelain format: XY <space> path  (or XY <space> old -> new for renames)
+      let filePath = line.slice(3);
+
+      // Handle renames: "R  old -> new"
+      const arrowIdx = filePath.indexOf(" -> ");
+      if (arrowIdx !== -1) filePath = filePath.slice(arrowIdx + 4);
+
+      const staged = x !== " " && x !== "?" && x !== "!";
+      const conflicted = (x === "U" || y === "U") || (x === "A" && y === "A") || (x === "D" && y === "D");
+
+      let status = "untracked";
+      if (conflicted) {
+        status = "conflicted";
+      } else if (x === "?" && y === "?") {
+        status = "untracked";
+      } else if (x === "A" || y === "A") {
+        status = "added";
+      } else if (x === "D" || y === "D") {
+        status = "deleted";
+      } else if (x === "R" || y === "R") {
+        status = "renamed";
+      } else if (x === "M" || y === "M") {
+        status = "modified";
+      }
+
+      statusMap.set(filePath, { status, staged, conflicted });
+    }
+  } catch {
+    // Not a git repo or git not installed → return empty map
+  }
+  return statusMap;
+}
+
+// ── Directory listing ────────────────────────────────────────
+
+/**
+ * Return the direct children of `absDir` as a flat array.
+ * Folders first, then files – both sorted alphabetically.
+ * Files with git changes get a `git` object; clean files omit it.
+ * Folders never include `git`.
+ */
+async function listDirectoryChildren(absDir, parentPath) {
+  const entries = await fs.readdir(absDir, { withFileTypes: true });
+
+  // Gather git status once for the whole workspace
+  const gitMap = await getGitStatusMap(USER_DIR);
+
+  // Sort: folders first, then files, alphabetically within each group
   entries.sort((a, b) => {
-    if (a.isDirectory() && !b.isDirectory()) return -1;
-    if (!a.isDirectory() && b.isDirectory()) return 1;
+    const aDir = a.isDirectory() ? 0 : 1;
+    const bDir = b.isDirectory() ? 0 : 1;
+    if (aDir !== bDir) return aDir - bDir;
     return a.name.localeCompare(b.name);
   });
 
+  const children = [];
+
   for (const ent of entries) {
     if (shouldIgnore(ent.name)) continue;
-    const relativePath = basePath ? `${basePath}/${ent.name}` : ent.name;
-    const fullPath = path.join(dir, ent.name);
+
+    const childPath =
+      parentPath === "/" ? `/${ent.name}` : `${parentPath}/${ent.name}`;
+    const fullPath = path.join(absDir, ent.name);
 
     if (ent.isDirectory()) {
-      const children = await buildArboristTree(fullPath, relativePath);
-      nodes.push({
-        id: relativePath,
+      let hasChildren = false;
+      try {
+        const sub = await fs.readdir(fullPath);
+        hasChildren = sub.some((s) => !shouldIgnore(s));
+      } catch {
+        // unreadable → treat as empty
+      }
+
+      children.push({
+        id: childPath,
+        parentId: parentPath,
         name: ent.name,
-        children,
+        kind: "folder",
+        hasChildren,
       });
     } else {
-      nodes.push({
-        id: relativePath,
+      const ext = path.extname(ent.name).slice(1);
+      let size = 0;
+      try {
+        const stat = await fs.stat(fullPath);
+        size = stat.size;
+      } catch {
+        // stat failed → default 0
+      }
+
+      // Git key is relative to USER_DIR (no leading slash)
+      const gitKey = childPath.startsWith("/") ? childPath.slice(1) : childPath;
+      const gitInfo = gitMap.get(gitKey);
+
+      const node = {
+        id: childPath,
+        parentId: parentPath,
         name: ent.name,
-      });
+        kind: "file",
+        hasChildren: false,
+        extension: ext || undefined,
+        size,
+      };
+
+      // Only attach git when the file has actual changes
+      if (gitInfo) node.git = gitInfo;
+
+      children.push(node);
     }
   }
 
-  return nodes;
+  return children;
 }
 
 const PORT = process.env.PORT || 3334;
