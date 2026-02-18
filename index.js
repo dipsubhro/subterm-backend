@@ -174,6 +174,49 @@ app.post("/file", async (req, res) => {
   }
 });
 
+// Rename file or folder
+app.post("/api/fs/rename", async (req, res) => {
+  const { oldPath, newPath } = req.body;
+  if (!oldPath || !newPath)
+    return res.status(400).json({ error: "Missing oldPath or newPath" });
+
+  const absOld = path.resolve(USER_DIR, `.${oldPath}`);
+  const absNew = path.resolve(USER_DIR, `.${newPath}`);
+
+  if (!absOld.startsWith(USER_DIR) || !absNew.startsWith(USER_DIR))
+    return res.status(403).json({ error: "Path traversal blocked" });
+
+  try {
+    await fs.rename(absOld, absNew);
+    res.json({ message: "Renamed successfully" });
+  } catch (e) {
+    console.error("[rename]", e);
+    if (e.code === "ENOENT") return res.status(404).json({ error: "Source not found" });
+    res.status(500).json({ error: "Failed to rename" });
+  }
+});
+
+// Delete file or folder
+app.post("/api/fs/delete", async (req, res) => {
+  const { path: targetPath } = req.body;
+  if (!targetPath || targetPath === "/")
+    return res.status(400).json({ error: "Invalid path" });
+
+  const abs = path.resolve(USER_DIR, `.${targetPath}`);
+
+  if (!abs.startsWith(USER_DIR) || abs === USER_DIR)
+    return res.status(403).json({ error: "Path traversal blocked" });
+
+  try {
+    await fs.rm(abs, { recursive: true, force: true });
+    res.json({ message: "Deleted successfully" });
+  } catch (e) {
+    console.error("[delete]", e);
+    if (e.code === "ENOENT") return res.status(404).json({ error: "Not found" });
+    res.status(500).json({ error: "Failed to delete" });
+  }
+});
+
 // GitHub Import - Clone repository to user folder
 app.post("/github/import", async (req, res) => {
   const { repoUrl, branch, repoName } = req.body;
