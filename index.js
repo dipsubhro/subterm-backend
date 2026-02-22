@@ -9,7 +9,9 @@ const path = require("path");
 const cors = require("cors");
 const chokidar = require("chokidar");
 
-const USER_DIR = path.join(__dirname, "user");
+const USER_DIR = path.resolve(
+  process.env.WORKSPACE_PATH || path.join(__dirname, "user"),
+);
 
 console.log("Workspace root:", USER_DIR);
 
@@ -21,26 +23,27 @@ const ptyProcess = pty.spawn("bash", ["--login"], {
   env: process.env,
 });
 
-
 const app = express();
 app.use(express.json());
 
-// CORS configuration - use CORS_ORIGIN env var or allow all in dev
-const allowedOrigins = process.env.CORS_ORIGIN 
-  ? process.env.CORS_ORIGIN.split(',') 
-  : ['http://localhost:5173', 'https://subterm.subhro.tech'];
+// CORS — accept explicit list from env, or allow all in dev
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",")
+  : true; // allows all in dev
 
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  }),
+);
 
 const server = http.createServer(app);
-const io = new SocketServer(server, { 
-  cors: { 
+const io = new SocketServer(server, {
+  cors: {
     origin: allowedOrigins,
-    credentials: true
-  } 
+    credentials: true,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -93,9 +96,9 @@ ptyProcess.onData((data) => io.emit("terminal:data", data));
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
-  
+
   ptyProcess.write("\n");
-  
+
   socket.on("terminal:write", (d) => ptyProcess.write(d));
 
   socket.on("terminal:resize", ({ cols, rows }) => {
@@ -116,7 +119,9 @@ app.get("/api/fs", async (req, res) => {
 
     // Block path-traversal: resolved path must stay inside USER_DIR
     if (!absPath.startsWith(USER_DIR)) {
-      return res.status(403).json({ error: "Access denied – outside workspace" });
+      return res
+        .status(403)
+        .json({ error: "Access denied – outside workspace" });
     }
 
     const children = await listDirectoryChildren(absPath, requestedPath);
@@ -191,7 +196,8 @@ app.post("/api/fs/rename", async (req, res) => {
     res.json({ message: "Renamed successfully" });
   } catch (e) {
     console.error("[rename]", e);
-    if (e.code === "ENOENT") return res.status(404).json({ error: "Source not found" });
+    if (e.code === "ENOENT")
+      return res.status(404).json({ error: "Source not found" });
     res.status(500).json({ error: "Failed to rename" });
   }
 });
@@ -212,7 +218,8 @@ app.post("/api/fs/delete", async (req, res) => {
     res.json({ message: "Deleted successfully" });
   } catch (e) {
     console.error("[delete]", e);
-    if (e.code === "ENOENT") return res.status(404).json({ error: "Not found" });
+    if (e.code === "ENOENT")
+      return res.status(404).json({ error: "Not found" });
     res.status(500).json({ error: "Failed to delete" });
   }
 });
@@ -227,14 +234,16 @@ app.post("/github/import", async (req, res) => {
 
   const targetDir = path.join(USER_DIR, repoName);
 
-  console.log(`[GitHub Import] Cloning ${repoUrl} (branch: ${branch || 'default'}) to ${targetDir}`);
+  console.log(
+    `[GitHub Import] Cloning ${repoUrl} (branch: ${branch || "default"}) to ${targetDir}`,
+  );
 
   try {
     // Check if directory already exists
     try {
       await fs.access(targetDir);
-      return res.status(400).json({ 
-        error: `Directory "${repoName}" already exists. Please delete it first or use a different name.` 
+      return res.status(400).json({
+        error: `Directory "${repoName}" already exists. Please delete it first or use a different name.`,
       });
     } catch {
       // Directory doesn't exist, which is what we want
@@ -247,9 +256,9 @@ app.post("/github/import", async (req, res) => {
 
     console.log(`[GitHub Import] Running: ${command}`);
 
-    await execAsync(command, { 
+    await execAsync(command, {
       cwd: USER_DIR,
-      timeout: 120000 // 2 minute timeout
+      timeout: 120000, // 2 minute timeout
     });
 
     // Remove .git folder to clean up (optional - comment out if you want to keep git history)
@@ -258,18 +267,20 @@ app.post("/github/import", async (req, res) => {
       await fs.rm(gitDir, { recursive: true, force: true });
       console.log(`[GitHub Import] Removed .git directory`);
     } catch (e) {
-      console.log(`[GitHub Import] Note: Could not remove .git directory:`, e.message);
+      console.log(
+        `[GitHub Import] Note: Could not remove .git directory:`,
+        e.message,
+      );
     }
 
     console.log(`[GitHub Import] Successfully cloned ${repoName}`);
-    res.json({ 
+    res.json({
       message: `Repository "${repoName}" imported successfully!`,
-      path: repoName
+      path: repoName,
     });
-
   } catch (e) {
     console.error("[GitHub Import] Error:", e);
-    
+
     // Clean up partial clone if it exists
     try {
       await fs.rm(targetDir, { recursive: true, force: true });
@@ -278,9 +289,15 @@ app.post("/github/import", async (req, res) => {
     // Parse error message for better user feedback
     let errorMessage = "Failed to clone repository";
     if (e.stderr) {
-      if (e.stderr.includes("not found") || e.stderr.includes("does not exist")) {
+      if (
+        e.stderr.includes("not found") ||
+        e.stderr.includes("does not exist")
+      ) {
         errorMessage = "Repository not found or is private";
-      } else if (e.stderr.includes("branch") && e.stderr.includes("not found")) {
+      } else if (
+        e.stderr.includes("branch") &&
+        e.stderr.includes("not found")
+      ) {
         errorMessage = `Branch "${branch}" not found`;
       } else {
         errorMessage = e.stderr.split("\n")[0] || errorMessage;
@@ -338,7 +355,11 @@ async function getGitStatusMap(cwd) {
       if (arrowIdx !== -1) filePath = filePath.slice(arrowIdx + 4);
 
       const staged = x !== " " && x !== "?" && x !== "!";
-      const conflicted = (x === "U" || y === "U") || (x === "A" && y === "A") || (x === "D" && y === "D");
+      const conflicted =
+        x === "U" ||
+        y === "U" ||
+        (x === "A" && y === "A") ||
+        (x === "D" && y === "D");
 
       let status = "untracked";
       if (conflicted) {
@@ -444,7 +465,7 @@ async function listDirectoryChildren(absDir, parentPath) {
   return children;
 }
 
-const PORT = process.env.PORT || 3334;
+const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
 
 server.listen(PORT, HOST, () => {

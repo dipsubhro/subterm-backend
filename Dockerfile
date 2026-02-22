@@ -34,20 +34,25 @@ COPY . .
 # Create non-root user for security
 RUN useradd -m appuser
 
-# Setup user directory with proper permissions
-RUN mkdir -p /app/user \
-  && chown -R appuser:appuser /app/user \
-  && chmod -R 755 /app/user
+# Setup workspace directory (mounted per-session by the gateway)
+RUN mkdir -p /workspace \
+  && chown appuser:appuser /workspace \
+  && chmod 755 /workspace
 
+# Setup app directory permissions
 RUN chown -R appuser:appuser /app \
   && chmod -R 755 /app
 
 USER appuser
 
+# Environment defaults (overridden per-container by the gateway)
+ENV PORT=3000 \
+    WORKSPACE_PATH=/workspace
+
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3334/api/get-tree', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })" || exit 1
+  CMD node -e "require('http').get('http://localhost:3000/api/get-tree', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })" || exit 1
 
-EXPOSE 3334
+EXPOSE 3000
 
 CMD ["node", "index.js"]
