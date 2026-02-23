@@ -34,6 +34,14 @@ COPY . .
 # Create non-root user for security
 RUN useradd -m appuser
 
+# Override `df` so that the terminal only shows container-relevant mounts
+# (overlay = container root, plus any explicit volume mounts like /workspace).
+# Without a kernel-level disk quota the underlying numbers still reflect the
+# host block device; StorageOpt on the gateway is needed to enforce a real cap.
+RUN printf '#!/bin/bash\n/bin/df "$@" | awk \x27NR==1 || $NF=="/" || $NF=="/workspace" || $1=="overlay"\x27\n' \
+    > /usr/local/bin/df \
+  && chmod +x /usr/local/bin/df
+
 # Setup workspace directory (mounted per-session by the gateway)
 RUN mkdir -p /workspace \
   && chown appuser:appuser /workspace \
