@@ -34,14 +34,13 @@ COPY . .
 # Create non-root user for security
 RUN useradd -m appuser
 
-# Override `df` — use --output to avoid line-wrap issues with long device names,
-# and filter to only the mounts that matter inside the container.
-# Falls back to plain `df "$@"` when a specific path/flag is given by the user.
+# Override `df` — filter out host-level mounts; only show container-relevant ones.
+# Pass-through only when the user explicitly specifies a path (non-flag arg).
 RUN printf '#!/bin/bash\n\
-if [ "$#" -gt 0 ]; then\n\
-  exec /bin/df "$@"\n\
-fi\n\
-/bin/df --output=source,size,used,avail,pcent,target | awk \x27NR==1 || $6=="/" || $6=="/workspace" || $1=="overlay"\x27\n' \
+for arg in "$@"; do\n\
+  case "$arg" in -*) ;; *) exec /bin/df "$@" ;; esac\n\
+done\n\
+exec /bin/df --output=source,size,used,avail,pcent,target "$@" | awk \x27NR==1 || $6=="/" || $6=="/workspace" || $1=="overlay"\x27\n' \
     > /usr/local/bin/df \
   && chmod +x /usr/local/bin/df
 
