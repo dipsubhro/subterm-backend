@@ -51,7 +51,7 @@ ENV PORT=3000 \
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/api/get-tree', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })" || exit 1
+  CMD node -e "require('http').get('http://localhost:3000/api/fs?path=/', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })" || exit 1
 
 EXPOSE 3000
 
