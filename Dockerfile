@@ -34,11 +34,14 @@ COPY . .
 # Create non-root user for security
 RUN useradd -m appuser
 
-# Override `df` so that the terminal only shows container-relevant mounts
-# (overlay = container root, plus any explicit volume mounts like /workspace).
-# Without a kernel-level disk quota the underlying numbers still reflect the
-# host block device; StorageOpt on the gateway is needed to enforce a real cap.
-RUN printf '#!/bin/bash\n/bin/df "$@" | awk \x27NR==1 || $NF=="/" || $NF=="/workspace" || $1=="overlay"\x27\n' \
+# Override `df` — use --output to avoid line-wrap issues with long device names,
+# and filter to only the mounts that matter inside the container.
+# Falls back to plain `df "$@"` when a specific path/flag is given by the user.
+RUN printf '#!/bin/bash\n\
+if [ "$#" -gt 0 ]; then\n\
+  exec /bin/df "$@"\n\
+fi\n\
+/bin/df --output=source,size,used,avail,pcent,target | awk \x27NR==1 || $6=="/" || $6=="/workspace" || $1=="overlay"\x27\n' \
     > /usr/local/bin/df \
   && chmod +x /usr/local/bin/df
 
