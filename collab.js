@@ -1,7 +1,9 @@
-import * as Y from "yjs";
+const Y = require("yjs");
 
 const docs = new Map();
 
-export function setupCollab(io, USER_DIR) {
+function setupCollab(io, USER_DIR) {
   const collab = io.of("/collab");
 }
+
+module.exports = { setupCollab };

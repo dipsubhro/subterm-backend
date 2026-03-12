@@ -8,6 +8,7 @@ const pty = require("node-pty");
 const path = require("path");
 const cors = require("cors");
 const chokidar = require("chokidar");
+const { setupCollab } = require("./collab");
 
 const USER_DIR = path.resolve(
   process.env.WORKSPACE_PATH || path.join(__dirname, "user"),
@@ -45,6 +46,8 @@ const io = new SocketServer(server, {
     credentials: true,
   },
 });
+
+setupCollab(io, USER_DIR);
 
 // ─────────────────────────────────────────────────────────────
 // File Watcher with Debounced Broadcasts
