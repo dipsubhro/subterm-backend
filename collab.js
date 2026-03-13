@@ -17,6 +17,9 @@ function setupCollab(io, USER_DIR) {
         const content = await fs.readFile(absPath, "utf8");
         ydoc.getText("monaco").insert(0, content);
       }
+      const ydoc = docs.get(filePath);
+      const update = Y.encodeStateAsUpdate(ydoc);
+      socket.emit("init-doc", update);
     });
   });
 }
