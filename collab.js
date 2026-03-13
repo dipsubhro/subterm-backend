@@ -21,6 +21,13 @@ function setupCollab(io, USER_DIR) {
       const update = Y.encodeStateAsUpdate(ydoc);
       socket.emit("init-doc", update);
     });
+
+    socket.on("y-update", ({ filePath, update }) => {
+      const ydoc = docs.get(filePath);
+      if (!ydoc) return;
+      Y.applyUpdate(ydoc, update);
+      socket.to(filePath).emit("y-update", update);
+    });
   });
 }
 
