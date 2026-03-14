@@ -6,10 +6,27 @@ const docs = new Map();
 
 function setupCollab(io, USER_DIR) {
   const collab = io.of("/collab");
+  const socketFileMap = new Map();
 
   collab.on("connection", (socket) => {
+    collab.emit("collab-count", collab.sockets.size);
+
+    socket.on("get-count", () => {
+      socket.emit("collab-count", collab.sockets.size);
+    });
+
+    socket.on("disconnecting", () => {
+      const filePath = socketFileMap.get(socket.id);
+      if (filePath) socketFileMap.delete(socket.id);
+    });
+
+    socket.on("disconnect", () => {
+      collab.emit("collab-count", collab.sockets.size);
+    });
+
     socket.on("join-file", async (filePath) => {
       socket.join(filePath);
+      socketFileMap.set(socket.id, filePath);
       if (!docs.has(filePath)) {
         const ydoc = new Y.Doc();
         docs.set(filePath, ydoc);
