@@ -28,6 +28,10 @@ function setupCollab(io, USER_DIR) {
       Y.applyUpdate(ydoc, update);
       socket.to(filePath).emit("y-update", update);
     });
+
+    socket.on("file-saved", ({ filePath }) => {
+      socket.to(filePath).emit("file-saved");
+    });
   });
 }
 
