@@ -8,7 +8,7 @@ const pty = require("node-pty");
 const path = require("path");
 const cors = require("cors");
 const chokidar = require("chokidar");
-const { setupCollab } = require("./collab");
+const { setupCollab, docs } = require("./collab");
 
 const USER_DIR = path.resolve(
   process.env.WORKSPACE_PATH || path.join(__dirname, "user"),
@@ -164,13 +164,19 @@ app.get("/file", async (req, res) => {
 });
 
 app.post("/file", async (req, res) => {
-  const { path: rel, content } = req.body;
-  if (!rel || content === undefined)
-    return res.status(400).json({ error: "Missing path or content" });
+  const { path: rel } = req.body;
+  if (!rel)
+    return res.status(400).json({ error: "Missing path" });
 
   const abs = path.resolve(USER_DIR, rel);
   if (!abs.startsWith(USER_DIR))
     return res.status(400).json({ error: "Path traversal blocked" });
+
+  const ydoc = docs.get(rel);
+  const content = ydoc ? ydoc.getText("monaco").toString() : req.body.content;
+
+  if (content === undefined)
+    return res.status(400).json({ error: "Missing content" });
 
   try {
     await fs.mkdir(path.dirname(abs), { recursive: true });

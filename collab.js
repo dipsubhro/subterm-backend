@@ -31,4 +31,4 @@ function setupCollab(io, USER_DIR) {
   });
 }
 
-module.exports = { setupCollab };
+module.exports = { setupCollab, docs };
